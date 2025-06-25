@@ -84,7 +84,7 @@ public class KafkaBrokerExtension implements ServiceExtension {
     @Override
     public void initialize(final ServiceExtensionContext context) {
         var selectionStrategy = context.getSetting(DPF_SELECTOR_STRATEGY, DEFAULT_DATAPLANE_SELECTOR_STRATEGY);
-        var kafkaOAuthService = new KafkaOAuthServiceImpl(httpClient, typeManager.getMapper());
+        var kafkaOAuthService = new KafkaOAuthServiceImpl(httpClient, typeManager.getMapper(), monitor);
         var controller = new KafkaBrokerDataFlowController(vault, kafkaOAuthService, transferTypeParser, getPropertiesProvider(),
                 selectorService, clientFactory, selectionStrategy, monitor, callbackUrl);
         dataFlowManager.register(controller);

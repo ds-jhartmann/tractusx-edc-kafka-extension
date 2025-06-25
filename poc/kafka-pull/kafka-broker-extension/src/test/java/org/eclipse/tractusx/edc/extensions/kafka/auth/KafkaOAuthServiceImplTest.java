@@ -24,6 +24,8 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.eclipse.edc.http.spi.EdcHttpClient;
+import org.eclipse.edc.spi.monitor.Monitor;
+import org.eclipse.tractusx.edc.extensions.kafka.auth.OAuthException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -47,6 +49,7 @@ class KafkaOAuthServiceImplTest {
 
     private EdcHttpClient mockHttpClient;
     private ObjectMapper mockObjectMapper;
+    private Monitor monitor;
     private KafkaOAuthServiceImpl oauthService;
     private Response mockResponse;
 
@@ -54,8 +57,9 @@ class KafkaOAuthServiceImplTest {
     void setUp() {
         mockHttpClient = mock(EdcHttpClient.class);
         mockObjectMapper = mock(ObjectMapper.class);
+        monitor = mock(Monitor.class);
         mockResponse = mock(Response.class);
-        oauthService = new KafkaOAuthServiceImpl(mockHttpClient, mockObjectMapper);
+        oauthService = new KafkaOAuthServiceImpl(mockHttpClient, mockObjectMapper, monitor);
     }
 
     @Nested
@@ -86,12 +90,15 @@ class KafkaOAuthServiceImplTest {
             // Arrange
             when(mockResponse.isSuccessful()).thenReturn(false);
             when(mockResponse.code()).thenReturn(403);
+            ResponseBody errorBody = mock(ResponseBody.class);
+            when(mockResponse.body()).thenReturn(errorBody);
+            when(errorBody.string()).thenReturn("err");
             when(mockHttpClient.execute(any(Request.class))).thenReturn(mockResponse);
 
             // Act & Assert
-            RuntimeException exception = assertThrows(RuntimeException.class,
+            OAuthException exception = assertThrows(OAuthException.class,
                     () -> oauthService.revokeToken(createCredentialsWithRevocationUrl(), TEST_TOKEN));
-            assertEquals("Revoke endpoint returned HTTP 403", exception.getMessage());
+            assertEquals("Revoke endpoint returned HTTP 403: err", exception.getMessage());
             verify(mockHttpClient, times(1)).execute(any(Request.class));
         }
 
@@ -101,7 +108,7 @@ class KafkaOAuthServiceImplTest {
             when(mockHttpClient.execute(any(Request.class))).thenThrow(new IOException(IO_ERROR_MESSAGE));
 
             // Act & Assert
-            RuntimeException exception = assertThrows(RuntimeException.class,
+            OAuthException exception = assertThrows(OAuthException.class,
                     () -> oauthService.revokeToken(createCredentialsWithRevocationUrl(), TEST_TOKEN));
             assertEquals("Failed to revoke OAuth2 token", exception.getMessage());
             verify(mockHttpClient, times(1)).execute(any(Request.class));
@@ -135,6 +142,7 @@ class KafkaOAuthServiceImplTest {
             when(mockResponse.body()).thenReturn(mockResponseBodyObj);
             when(mockResponseBodyObj.string()).thenReturn(mockResponseBody);
             when(mockJsonNode.get(ACCESS_TOKEN_KEY)).thenReturn(mockTokenNode);
+            when(mockJsonNode.has(ACCESS_TOKEN_KEY)).thenReturn(true);
             when(mockTokenNode.asText()).thenReturn(TEST_TOKEN);
             when(mockHttpClient.execute(any(Request.class))).thenReturn(mockResponse);
             when(mockObjectMapper.readTree(mockResponseBody)).thenReturn(mockJsonNode);
@@ -152,12 +160,15 @@ class KafkaOAuthServiceImplTest {
             // Arrange
             when(mockResponse.isSuccessful()).thenReturn(false);
             when(mockResponse.code()).thenReturn(401);
+            ResponseBody errorBody = mock(ResponseBody.class);
+            when(mockResponse.body()).thenReturn(errorBody);
+            when(errorBody.string()).thenReturn("error");
             when(mockHttpClient.execute(any(Request.class))).thenReturn(mockResponse);
 
             // Act & Assert
-            RuntimeException exception = assertThrows(RuntimeException.class,
+            OAuthException exception = assertThrows(OAuthException.class,
                     () -> oauthService.getAccessToken(createCredentials()));
-            assertEquals("OAuth2 token endpoint returned HTTP 401", exception.getMessage());
+            assertEquals("OAuth2 token endpoint returned HTTP 401: error", exception.getMessage());
             verify(mockHttpClient, times(1)).execute(any(Request.class));
         }
 
@@ -167,7 +178,7 @@ class KafkaOAuthServiceImplTest {
             when(mockHttpClient.execute(any(Request.class))).thenThrow(new IOException(IO_ERROR_MESSAGE));
 
             // Act & Assert
-            RuntimeException exception = assertThrows(RuntimeException.class,
+            OAuthException exception = assertThrows(OAuthException.class,
                     () -> oauthService.getAccessToken(createCredentials()));
             assertEquals("Failed to fetch OAuth2 token", exception.getMessage());
             verify(mockHttpClient, times(1)).execute(any(Request.class));

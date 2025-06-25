@@ -24,6 +24,7 @@ import okhttp3.FormBody;
 import okhttp3.Request;
 import okhttp3.Response;
 import org.eclipse.edc.http.spi.EdcHttpClient;
+import org.eclipse.edc.spi.monitor.Monitor;
 
 import java.io.IOException;
 
@@ -43,10 +44,11 @@ public class KafkaOAuthServiceImpl implements KafkaOAuthService {
 
     private final EdcHttpClient httpClient;
     private final ObjectMapper objectMapper;
-
-    public KafkaOAuthServiceImpl(final EdcHttpClient httpClient, final ObjectMapper objectMapper) {
+    private final Monitor monitor;
+    public KafkaOAuthServiceImpl(final EdcHttpClient httpClient, final ObjectMapper objectMapper, final Monitor monitor) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
+        this.monitor = monitor;
     }
 
     /**
@@ -57,6 +59,7 @@ public class KafkaOAuthServiceImpl implements KafkaOAuthService {
     }
 
     private String fetchNewToken(final OAuthCredentials creds) {
+        validateHttpsUrl(creds.tokenUrl());
         try {
             FormBody formBody = new FormBody.Builder()
                     .add(GRANT_TYPE_KEY, CLIENT_CREDENTIALS_GRANT_TYPE)
@@ -71,16 +74,22 @@ public class KafkaOAuthServiceImpl implements KafkaOAuthService {
                     .build();
 
             try (Response response = httpClient.execute(request)) {
+                var body = response.body() != null ? response.body().string() : "";
                 if (!response.isSuccessful()) {
-                    throw new RuntimeException("OAuth2 token endpoint returned HTTP " + response.code());
+                    monitor.warning("OAuth2 token endpoint returned HTTP " + response.code());
+                    throw new OAuthException("OAuth2 token endpoint returned HTTP " + response.code() + ": " + body);
                 }
 
-                String responseBody = response.body() != null ? response.body().string() : "";
-                JsonNode json = objectMapper.readTree(responseBody);
-                return json.get(ACCESS_TOKEN_KEY).asText();
+                JsonNode json = objectMapper.readTree(body);
+                if (json.has(ACCESS_TOKEN_KEY)) {
+                    return json.get(ACCESS_TOKEN_KEY).asText();
+                } else {
+                    monitor.warning("Token response missing 'access_token' field");
+                    throw new OAuthException("Token response missing 'access_token'");
+                }
             }
         } catch (IOException e) {
-            throw new RuntimeException("Failed to fetch OAuth2 token", e);
+            throw new OAuthException("Failed to fetch OAuth2 token", e);
         }
     }
 
@@ -91,6 +100,8 @@ public class KafkaOAuthServiceImpl implements KafkaOAuthService {
         if (creds.revocationUrl().isEmpty()) {
             return;
         }
+        var revokeUrl = creds.revocationUrl().get();
+        validateHttpsUrl(revokeUrl);
         try {
             FormBody formBody = new FormBody.Builder()
                     .add(TOKEN_KEY, token)
@@ -105,12 +116,20 @@ public class KafkaOAuthServiceImpl implements KafkaOAuthService {
                     .build();
 
             try (Response response = httpClient.execute(request)) {
+                var body = response.body() != null ? response.body().string() : "";
                 if (!response.isSuccessful()) {
-                    throw new RuntimeException("Revoke endpoint returned HTTP " + response.code());
+                    monitor.warning("Revoke endpoint returned HTTP " + response.code());
+                    throw new OAuthException("Revoke endpoint returned HTTP " + response.code() + ": " + body);
                 }
             }
         } catch (IOException e) {
-            throw new RuntimeException("Failed to revoke OAuth2 token", e);
+            throw new OAuthException("Failed to revoke OAuth2 token", e);
+        }
+    }
+
+    private void validateHttpsUrl(String url) {
+        if (url != null && !url.startsWith("https://")) {
+            throw new OAuthException("URL must use HTTPS: " + url);
         }
     }
 }
